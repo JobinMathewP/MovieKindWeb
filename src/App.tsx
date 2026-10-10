@@ -82,6 +82,15 @@ export function App() {
     setRoute({ name: "welcome" });
   }
 
+  function applyReview(review: Review) {
+    const liked = toLiked(review);
+    setRoute((current) => {
+      if (current.name !== "home" && current.name !== "match") return current;
+      const rest = current.likes.filter((film) => film.tmdbId !== review.tmdbId);
+      return { ...current, likes: liked ? [liked, ...rest] : rest };
+    });
+  }
+
   let body: ReactNode;
   if (!supabase) {
     body = (
@@ -142,6 +151,7 @@ export function App() {
           setRoute({ name: "match", profile: route.profile, likes: route.likes, seeds })
         }
         onNeedFilms={() => setRoute({ name: "likes", profile: route.profile, likes: route.likes })}
+        onReviewed={applyReview}
         onSignOut={() => void signOut()}
       />
     );
@@ -150,6 +160,7 @@ export function App() {
       <MatchScreen
         seeds={route.seeds}
         onBack={() => setRoute({ name: "home", profile: route.profile, likes: route.likes, tab: "home" })}
+        onReviewed={applyReview}
       />
     );
   }

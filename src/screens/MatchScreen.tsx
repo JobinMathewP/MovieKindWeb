@@ -1,20 +1,24 @@
 import { useEffect, useState } from "react";
 import { Poster } from "../components/Poster";
+import { ReviewSheet } from "../components/ReviewSheet";
 import { Stars } from "../components/Stars";
-import { api, ApiError, errorText } from "../lib/api";
+import { api, errorText } from "../lib/api";
 import { downloadBlob, renderCardPng } from "../lib/cardImage";
-import { formatRuntime, initials, lovedSentence, metaLine, prefersReducedMotion } from "../lib/format";
-import type { Film, LikedFilm, Recommendation } from "../lib/types";
+import { formatRuntime, lovedSentence, metaLine, prefersReducedMotion } from "../lib/format";
+import { saveReview } from "../lib/reviews";
+import type { Film, LikedFilm, Recommendation, Review } from "../lib/types";
 
 type Props = {
   seeds: LikedFilm[];
   onBack: () => void;
+  onReviewed: (review: Review) => void;
 };
 
 type Phase = "wait" | "reveal" | "show";
-type Panel = "result" | "why" | "share";
+type Panel = "result" | "share";
+type SavedReview = { rating: number; body: string | null };
 
-export function MatchScreen({ seeds, onBack }: Props) {
+export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
   const seedKey = seeds.map((seed) => seed.tmdbId).join(",");
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState<Phase>("wait");
@@ -25,6 +29,9 @@ export function MatchScreen({ seeds, onBack }: Props) {
   const [actionError, setActionError] = useState("");
   const [slow, setSlow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [saved, setSaved] = useState<Record<number, SavedReview>>({});
+  const [chosenId, setChosenId] = useState<number | null>(null);
   const [details, setDetails] = useState<Record<number, Film>>({});
 
   useEffect(() => {
@@ -37,6 +44,9 @@ export function MatchScreen({ seeds, onBack }: Props) {
     setResults([]);
     setIndex(0);
     setPanel("result");
+    setReviewOpen(false);
+    setSaved({});
+    setChosenId(null);
     setSlow(false);
     void (async () => {
       try {
@@ -120,10 +130,6 @@ export function MatchScreen({ seeds, onBack }: Props) {
     );
   }
 
-  if (panel === "why") {
-    return <WhyMatch film={current} seeds={seeds} onBack={() => setPanel("result")} />;
-  }
-
   if (panel === "share") {
     return (
       <ShareCard
@@ -138,24 +144,24 @@ export function MatchScreen({ seeds, onBack }: Props) {
   const detail = details[current.tmdbId];
   const runtime = formatRuntime(detail?.runtimeMinutes ?? null);
 
-  async function seenIt() {
+  const mine = saved[current.tmdbId];
+  const chosen = chosenId === current.tmdbId;
+  const people =
+    current.matchCount === 1 ? "1 person who loved the same films as you" : `${current.matchCount} people who loved the same films as you`;
+
+  async function commitSeen(rating: number | null, text: string | null) {
     setBusy(true);
     setActionError("");
     try {
-      await saveSeen(current.tmdbId);
-      setIndex((value) => value + 1);
-    } catch (caught) {
-      if (caught instanceof ApiError && caught.status === 400 && /film not found/i.test(caught.message)) {
-        try {
-          await api<Film>("/films", { method: "POST", body: { tmdbId: current.tmdbId } });
-          await saveSeen(current.tmdbId);
-          setIndex((value) => value + 1);
-          return;
-        } catch (retryError) {
-          setActionError(errorText(retryError));
-          return;
-        }
+      const review = await saveReview(current.tmdbId, rating, text);
+      onReviewed(review);
+      setReviewOpen(false);
+      if (rating == null) {
+        setIndex((value) => value + 1);
+      } else {
+        setSaved((prev) => ({ ...prev, [current.tmdbId]: { rating, body: text } }));
       }
+    } catch (caught) {
       setActionError(errorText(caught));
     } finally {
       setBusy(false);
@@ -164,58 +170,155 @@ export function MatchScreen({ seeds, onBack }: Props) {
 
   return (
     <section className="screen">
-      <div className="topbar">
+      <div className="topbar split">
         <button type="button" className="back" onClick={onBack} aria-label="Back">
           ‹
         </button>
+        <button type="button" className="icon-btn" aria-label="Share" onClick={() => setPanel("share")}>
+          <ShareIcon />
+        </button>
       </div>
-      <div className="scroll result-scroll">
+      <div className="scroll pick-scroll">
+        <h1 className="pick-lead">{index === 0 ? "Your movie for tonight." : "Another great pick for tonight."}</h1>
+        <p className="pick-based">Based on {people}.</p>
         <div className="frame result-hero">
           <Poster path={current.posterPath} title={current.title} size="hero" />
         </div>
         <h2 className="result-title">{current.title}</h2>
-        <p className="meta">{metaLine(current.year, current.genres, runtime)}</p>
-        <div className="star-row">
-          <Stars value={current.averageRating} label={`Average rating ${current.averageRating}`} />
+        <p className="meta">{metaLine(current.year, current.genres.slice(0, 3), runtime)}</p>
+        <div className="score-row">
+          <Stars value={current.averageRating} label={`Average rating ${current.averageRating} of 5`} />
+          <span className="score-num">{formatScore(current.averageRating)}</span>
         </div>
-        <button type="button" className="loved" onClick={() => setPanel("why")}>
-          {sentence}
-        </button>
         {detail?.overview ? <p className="overview">{detail.overview}</p> : null}
-        {actionError ? (
+        {current.genres.length > 0 ? (
+          <div className="tag-row">
+            {current.genres.map((genre) => (
+              <span key={genre} className="tag">
+                {genre}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div className="evidence">
+          <h3>Loved by people who also loved</h3>
+          <div className="seed-row">
+            {seeds.map((seed) => (
+              <div key={seed.tmdbId} className="seed-card">
+                <div className="frame">
+                  <Poster path={seed.posterPath} title={seed.title} />
+                </div>
+                <p className="caption">{seed.title}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        {mine ? (
+          <div className="saved-review">
+            <div className="saved-head">
+              <p>Your review saved</p>
+              <button type="button" onClick={() => setReviewOpen(true)}>
+                Edit
+              </button>
+            </div>
+            <Stars value={mine.rating} label={`You rated this ${mine.rating} of 5`} />
+            {mine.body ? <p>{mine.body}</p> : null}
+          </div>
+        ) : null}
+        {actionError && !reviewOpen ? (
           <p className="alert" role="alert">
             {actionError}
           </p>
         ) : null}
       </div>
-      <div className="dock action-row">
+      <div className="dock pick-actions">
         <button
           type="button"
-          className="btn ghost"
+          className="pick-side"
           disabled={busy}
           onClick={() => {
             setActionError("");
+            setReviewOpen(false);
             setIndex((value) => value + 1);
           }}
         >
+          <PassIcon />
           Not for me
         </button>
-        <button type="button" className="btn ghost" disabled={busy} onClick={() => void seenIt()}>
+        <button
+          type="button"
+          className="pick-side"
+          disabled={busy}
+          onClick={() => {
+            setActionError("");
+            setReviewOpen(true);
+          }}
+        >
+          <SeenIcon />
           Seen it
         </button>
-        <button type="button" className="btn gold" disabled={busy} onClick={() => setPanel("share")}>
-          Share
+        <button
+          type="button"
+          className={chosen ? "btn gold pick-choose is-on" : "btn gold pick-choose"}
+          aria-pressed={chosen}
+          disabled={busy}
+          onClick={() => setChosenId(chosen ? null : current.tmdbId)}
+        >
+          {chosen ? "Chosen for tonight" : "I'll watch this"}
         </button>
       </div>
+      {reviewOpen ? (
+        <ReviewSheet
+          filmTitle={current.title}
+          heading="How would you rate it?"
+          initialRating={mine?.rating ?? 0}
+          initialBody={mine?.body ?? ""}
+          skipLabel="Skip for now"
+          busy={busy}
+          error={actionError}
+          onSave={(rating, text) => void commitSeen(rating, text)}
+          onSkip={() => void commitSeen(null, null)}
+          onClose={() => {
+            if (!busy) setReviewOpen(false);
+          }}
+        />
+      ) : null}
     </section>
   );
 }
 
-function saveSeen(tmdbId: number) {
-  return api("/reviews", {
-    method: "PUT",
-    body: { tmdbId, rating: null, body: null },
-  });
+function formatScore(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+}
+
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v11" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M7.5 7.5 12 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 12.5V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-6.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PassIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M8 12h8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SeenIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
 }
 
 function Finding({
@@ -267,52 +370,6 @@ function Finding({
           </button>
         </div>
       ) : null}
-    </section>
-  );
-}
-
-function WhyMatch({
-  film,
-  seeds,
-  onBack,
-}: {
-  film: Recommendation;
-  seeds: LikedFilm[];
-  onBack: () => void;
-}) {
-  const names = film.matchNames.map((name) => name.trim()).filter(Boolean);
-  const extra = Math.max(0, film.matchCount - names.length);
-  return (
-    <section className="screen">
-      <div className="topbar">
-        <button type="button" className="back" onClick={onBack} aria-label="Back">
-          ‹
-        </button>
-      </div>
-      <div className="scroll">
-        <h1>Why this match?</h1>
-        <p className="lede">{film.matchCount} people also rated these films 4 or 5.</p>
-        <div className="avatar-row">
-          {names.map((name, nameIndex) => (
-            <span key={`${name}-${nameIndex}`} className="avatar" title={name}>
-              {initials(name)}
-            </span>
-          ))}
-          {extra > 0 ? <span className="avatar more">+{extra}</span> : null}
-        </div>
-        <p className="kicker">Films in common</p>
-        <div className="seed-row">
-          {seeds.map((seed) => (
-            <div key={seed.tmdbId} className="seed-card">
-              <div className="frame">
-                <Poster path={seed.posterPath} title={seed.title} />
-              </div>
-              <p className="caption">{seed.title}</p>
-              <Stars value={seed.rating} label={`You rated this ${seed.rating} of 5`} />
-            </div>
-          ))}
-        </div>
-      </div>
     </section>
   );
 }

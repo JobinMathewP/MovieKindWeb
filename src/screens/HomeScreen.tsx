@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { CheckMark, Poster } from "../components/Poster";
 import { Stars } from "../components/Stars";
 import { languageName } from "../lib/languages";
-import type { LikedFilm, Profile } from "../lib/types";
+import type { LikedFilm, Profile, Review } from "../lib/types";
+import { SearchPanel } from "./SearchScreen";
 
-export type HomeTab = "home" | "films" | "profile";
+export type HomeTab = "home" | "search" | "films" | "profile";
 
 type Props = {
   profile: Profile;
@@ -13,10 +14,11 @@ type Props = {
   onTab: (tab: HomeTab) => void;
   onFind: (seeds: LikedFilm[]) => void;
   onNeedFilms: () => void;
+  onReviewed: (review: Review) => void;
   onSignOut: () => void;
 };
 
-export function HomeScreen({ profile, likes, tab, onTab, onFind, onNeedFilms, onSignOut }: Props) {
+export function HomeScreen({ profile, likes, tab, onTab, onFind, onNeedFilms, onReviewed, onSignOut }: Props) {
   const [mood, setMood] = useState("All");
   const [picked, setPicked] = useState<number[]>([]);
 
@@ -41,6 +43,8 @@ export function HomeScreen({ profile, likes, tab, onTab, onFind, onNeedFilms, on
 
   return (
     <section className="screen">
+      {tab === "search" ? <SearchPanel onReviewed={onReviewed} /> : null}
+
       {tab === "home" && likes.length >= 2 ? (
         <>
           <div className="scroll">
@@ -147,6 +151,10 @@ export function HomeScreen({ profile, likes, tab, onTab, onFind, onNeedFilms, on
           <HomeIcon />
           Home
         </button>
+        <button type="button" aria-current={tab === "search" ? "page" : undefined} onClick={() => onTab("search")}>
+          <SearchIcon />
+          Search
+        </button>
         <button type="button" aria-current={tab === "films" ? "page" : undefined} onClick={() => onTab("films")}>
           <FilmIcon />
           My Films
@@ -170,6 +178,15 @@ function HomeIcon() {
         strokeWidth="1.7"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="tab-icon" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M16 16.5 20 20.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }
