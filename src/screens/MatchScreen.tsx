@@ -16,7 +16,6 @@ type Props = {
 
 type Phase = "wait" | "reveal" | "show";
 type Panel = "result" | "share";
-type SavedReview = { rating: number; body: string | null };
 
 export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
   const seedKey = seeds.map((seed) => seed.tmdbId).join(",");
@@ -28,9 +27,7 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [slow, setSlow] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [saved, setSaved] = useState<Record<number, SavedReview>>({});
   const [chosenId, setChosenId] = useState<number | null>(null);
   const [details, setDetails] = useState<Record<number, Film>>({});
 
@@ -45,7 +42,6 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
     setIndex(0);
     setPanel("result");
     setReviewOpen(false);
-    setSaved({});
     setChosenId(null);
     setSlow(false);
     void (async () => {
@@ -120,6 +116,11 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
       <section className="screen">
         <div className="scroll center-copy">
           <h1>No one else has loved these films yet</h1>
+          {actionError ? (
+            <p className="alert" role="alert">
+              {actionError}
+            </p>
+          ) : null}
         </div>
         <div className="dock">
           <button type="button" className="btn gold" onClick={onBack}>
@@ -144,28 +145,22 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
   const detail = details[current.tmdbId];
   const runtime = formatRuntime(detail?.runtimeMinutes ?? null);
 
-  const mine = saved[current.tmdbId];
   const chosen = chosenId === current.tmdbId;
   const people =
     current.matchCount === 1 ? "1 person who loved the same films as you" : `${current.matchCount} people who loved the same films as you`;
 
-  async function commitSeen(rating: number | null, text: string | null) {
-    setBusy(true);
+  function commitSeen(rating: number | null, text: string | null) {
+    const filmId = current.tmdbId;
+    const filmTitle = current.title;
     setActionError("");
-    try {
-      const review = await saveReview(current.tmdbId, rating, text);
-      onReviewed(review);
-      setReviewOpen(false);
-      if (rating == null) {
-        setIndex((value) => value + 1);
-      } else {
-        setSaved((prev) => ({ ...prev, [current.tmdbId]: { rating, body: text } }));
-      }
-    } catch (caught) {
-      setActionError(errorText(caught));
-    } finally {
-      setBusy(false);
-    }
+    setReviewOpen(false);
+    setIndex((value) => value + 1);
+    void saveReview(filmId, rating, text)
+      .then((review) => onReviewed(review))
+      .catch((caught) => {
+        const what = rating == null ? `mark ${filmTitle} as seen` : `save your review for ${filmTitle}`;
+        setActionError(`Could not ${what}. ${errorText(caught)}`);
+      });
   }
 
   return (
@@ -213,18 +208,6 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
             ))}
           </div>
         </div>
-        {mine ? (
-          <div className="saved-review">
-            <div className="saved-head">
-              <p>Your review saved</p>
-              <button type="button" onClick={() => setReviewOpen(true)}>
-                Edit
-              </button>
-            </div>
-            <Stars value={mine.rating} label={`You rated this ${mine.rating} of 5`} />
-            {mine.body ? <p>{mine.body}</p> : null}
-          </div>
-        ) : null}
         {actionError && !reviewOpen ? (
           <p className="alert" role="alert">
             {actionError}
@@ -235,7 +218,6 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
         <button
           type="button"
           className="pick-side"
-          disabled={busy}
           onClick={() => {
             setActionError("");
             setReviewOpen(false);
@@ -248,7 +230,6 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
         <button
           type="button"
           className="pick-side"
-          disabled={busy}
           onClick={() => {
             setActionError("");
             setReviewOpen(true);
@@ -261,7 +242,6 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
           type="button"
           className={chosen ? "btn gold pick-choose is-on" : "btn gold pick-choose"}
           aria-pressed={chosen}
-          disabled={busy}
           onClick={() => setChosenId(chosen ? null : current.tmdbId)}
         >
           {chosen ? "Chosen for tonight" : "I'll watch this"}
@@ -271,16 +251,12 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
         <ReviewSheet
           filmTitle={current.title}
           heading="How would you rate it?"
-          initialRating={mine?.rating ?? 0}
-          initialBody={mine?.body ?? ""}
           skipLabel="Skip for now"
-          busy={busy}
-          error={actionError}
-          onSave={(rating, text) => void commitSeen(rating, text)}
-          onSkip={() => void commitSeen(null, null)}
-          onClose={() => {
-            if (!busy) setReviewOpen(false);
-          }}
+          busy={false}
+          error=""
+          onSave={(rating, text) => commitSeen(rating, text)}
+          onSkip={() => commitSeen(null, null)}
+          onClose={() => setReviewOpen(false)}
         />
       ) : null}
     </section>
