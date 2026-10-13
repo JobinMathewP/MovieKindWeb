@@ -28,15 +28,6 @@ export async function currentIsGuest(): Promise<boolean> {
   return isGuestUser(data.session?.user);
 }
 
-export async function linkGoogle(): Promise<void> {
-  if (!supabase) return;
-  const { error } = await supabase.auth.linkIdentity({
-    provider: "google",
-    options: { redirectTo: window.location.origin },
-  });
-  if (error) throw error;
-}
-
 export function suggestedDisplayName(user: User | null | undefined): string {
   const sources: unknown[] = [user?.user_metadata, ...(user?.identities ?? []).map((identity) => identity.identity_data)];
   for (const source of sources) {

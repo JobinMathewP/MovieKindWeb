@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiError, errorText, setUnauthorizedHandler, wakeServer } from "./lib/api";
 import { toLiked } from "./lib/format";
-import { currentIsGuest, linkGoogle, suggestedDisplayName, supabase } from "./lib/supabase";
+import { linkGoogle, mergeGuestReviews } from "./lib/guestMerge";
+import { currentIsGuest, suggestedDisplayName, supabase } from "./lib/supabase";
 import type { LikedFilm, Profile, Review } from "./lib/types";
 import { FirstLikesScreen } from "./screens/FirstLikesScreen";
 import { HomeScreen, type HomeTab } from "./screens/HomeScreen";
@@ -11,7 +12,7 @@ import { WelcomeScreen } from "./screens/WelcomeScreen";
 
 type Route =
   | { name: "boot" }
-  | { name: "welcome"; message?: string }
+  | { name: "welcome"; message?: string; accountExists?: boolean }
   | { name: "languages"; suggestedName: string; guest: boolean }
   | { name: "likes"; profile: Profile; likes: LikedFilm[]; guest: boolean }
   | { name: "home"; profile: Profile; likes: LikedFilm[]; tab: HomeTab; guest: boolean }
@@ -23,7 +24,7 @@ export function App() {
   const [slow, setSlow] = useState(false);
   const generation = useRef(0);
   const bootHandled = useRef(false);
-  const oauthError = useRef<string | null | undefined>(undefined);
+  const oauthError = useRef<OAuthReturn | null | undefined>(undefined);
 
   const toWelcome = useCallback(() => {
     generation.current += 1;
@@ -39,6 +40,8 @@ export function App() {
     setRoute({ name: "boot" });
     setSlow(false);
     try {
+      await mergeGuestReviews();
+      if (gen !== generation.current) return;
       const guest = await currentIsGuest();
       if (gen !== generation.current) return;
       const profile = await api<Profile>("/me");
@@ -91,7 +94,11 @@ export function App() {
     if (returnedError) {
       bootHandled.current = true;
       stripOAuthQuery();
-      setRoute({ name: "welcome", message: returnedError });
+      setRoute({
+        name: "welcome",
+        message: returnedError.accountExists ? undefined : returnedError.message,
+        accountExists: returnedError.accountExists,
+      });
     }
 
     const {
@@ -177,10 +184,19 @@ export function App() {
     body = (
       <WelcomeScreen
         oauthError={route.message}
+        accountExists={route.accountExists}
         onExplore={() => {
           bootHandled.current = true;
           void enter();
         }}
+        onResumeGuest={
+          route.accountExists
+            ? () => {
+                bootHandled.current = true;
+                void enter();
+              }
+            : undefined
+        }
       />
     );
   } else if (route.name === "languages") {
@@ -232,12 +248,17 @@ export function App() {
 
 const OAUTH_PARAMS = ["code", "state", "error", "error_code", "error_description", "sb_flow_id"];
 
-function oauthReturnError(): string | null {
+type OAuthReturn = { message: string; accountExists: boolean };
+
+function oauthReturnError(): OAuthReturn | null {
   const params = new URLSearchParams(window.location.search);
   const description = params.get("error_description");
   const error = params.get("error");
-  if (!description && !error) return null;
-  return description || error || "Sign-in failed";
+  const code = params.get("error_code");
+  if (!description && !error && !code) return null;
+  const message = description || error || "Sign-in failed";
+  const accountExists = code === "identity_already_exists" || /already linked to another user/i.test(message);
+  return { message, accountExists };
 }
 
 function stripOAuthQuery() {

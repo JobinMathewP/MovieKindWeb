@@ -104,5 +104,6 @@ export function errorText(error: unknown): string {
     return error.message;
   }
   if (error instanceof DOMException && error.name === "AbortError") return "Cancelled";
+  if (error instanceof Error && error.message) return error.message;
   return "Something went wrong";
 }

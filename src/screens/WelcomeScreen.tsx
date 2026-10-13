@@ -2,14 +2,17 @@ import { useState } from "react";
 import { GoogleButton } from "../components/GoogleButton";
 import { Poster } from "../components/Poster";
 import { COLLAGE } from "../lib/content";
+import { clearGuestReviews } from "../lib/guestMerge";
 import { supabase } from "../lib/supabase";
 
 type Props = {
   oauthError?: string;
+  accountExists?: boolean;
   onExplore: () => void;
+  onResumeGuest?: () => void;
 };
 
-export function WelcomeScreen({ oauthError = "", onExplore }: Props) {
+export function WelcomeScreen({ oauthError = "", accountExists = false, onExplore, onResumeGuest }: Props) {
   const [busy, setBusy] = useState<"google" | "explore" | null>(null);
   const [error, setError] = useState(oauthError);
 
@@ -37,6 +40,7 @@ export function WelcomeScreen({ oauthError = "", onExplore }: Props) {
       setError(signError?.message || "Guest mode isn't available right now. Continue with Google.");
       return;
     }
+    clearGuestReviews();
     onExplore();
   }
 
@@ -60,16 +64,27 @@ export function WelcomeScreen({ oauthError = "", onExplore }: Props) {
         </p>
       </div>
       <div className="stack welcome-form">
+        {accountExists ? (
+          <p className="lede">This Google account already has your taste. We'll keep that profile and add any new films from this visit.</p>
+        ) : null}
         {error ? (
           <p className="alert" role="alert">
             {error}
           </p>
         ) : null}
         <GoogleButton busy={busy === "google"} onClick={() => void google()} />
-        <button type="button" className="explore-link" disabled={busy !== null} onClick={() => void explore()}>
-          {busy === "explore" ? "Opening…" : "Explore first →"}
-        </button>
-        <p className="explore-note">No account needed</p>
+        {accountExists && onResumeGuest ? (
+          <button type="button" className="explore-link" disabled={busy !== null} onClick={onResumeGuest}>
+            Back to guest
+          </button>
+        ) : (
+          <>
+            <button type="button" className="explore-link" disabled={busy !== null} onClick={() => void explore()}>
+              {busy === "explore" ? "Opening…" : "Explore first →"}
+            </button>
+            <p className="explore-note">No account needed</p>
+          </>
+        )}
       </div>
     </section>
   );
