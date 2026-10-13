@@ -3,7 +3,7 @@ import { Poster } from "../components/Poster";
 import { api, errorText } from "../lib/api";
 import { toLiked } from "../lib/format";
 import { languageName } from "../lib/languages";
-import type { Film, LikedFilm, Review, SearchHit } from "../lib/types";
+import type { LikedFilm, Review, SearchHit } from "../lib/types";
 
 type Props = {
   languages: string[];
@@ -12,6 +12,17 @@ type Props = {
 };
 
 const SWIPE_PX = 80;
+
+function asLiked(hit: SearchHit): LikedFilm {
+  return {
+    tmdbId: hit.tmdbId,
+    title: hit.title,
+    year: hit.year,
+    posterPath: hit.posterPath,
+    genres: hit.genreNames,
+    rating: 5,
+  };
+}
 
 export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
   const [likes, setLikes] = useState(initialLikes);
@@ -24,14 +35,15 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
-  const [pendingId, setPendingId] = useState<number | null>(null);
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [shift, setShift] = useState(0);
   const likesRef = useRef(likes);
   const skippedRef = useRef(skipped);
   const loadSeq = useRef(0);
   const searchSeq = useRef(0);
+  const loveAttempt = useRef(new Map<number, number>());
   const origin = useRef<number | null>(null);
   const dragX = useRef(0);
   likesRef.current = likes;
@@ -113,8 +125,8 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
     return () => window.clearTimeout(handle);
   }, [trimmed]);
 
-  function afterCard(nextLikes: LikedFilm[], rest: SearchHit[]) {
-    const crossedFive = likes.length < 5 && nextLikes.length >= 5;
+  function afterCard(previousCount: number, nextLikes: LikedFilm[], rest: SearchHit[]) {
+    const crossedFive = previousCount < 5 && nextLikes.length >= 5;
     const moreLanguages = languageIndex < languages.length - 1;
     if (crossedFive && moreLanguages) {
       setDeck([]);
@@ -134,35 +146,50 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
     setExhausted(true);
   }
 
-  async function love(hit: SearchHit) {
-    if (pendingId !== null || likes.some((film) => film.tmdbId === hit.tmdbId)) return;
-    setPendingId(hit.tmdbId);
-    setError("");
+  function love(hit: SearchHit) {
+    const previous = likesRef.current;
+    if (previous.some((film) => film.tmdbId === hit.tmdbId)) return;
+    const attempt = (loveAttempt.current.get(hit.tmdbId) ?? 0) + 1;
+    loveAttempt.current.set(hit.tmdbId, attempt);
+    const next = [...previous, asLiked(hit)];
+    likesRef.current = next;
+    setLikes(next);
+    setNotice("");
     setShift(0);
     origin.current = null;
-    try {
-      await api<Film>("/films", { method: "POST", body: { tmdbId: hit.tmdbId } });
-      const review = await api<Review>("/reviews", {
-        method: "PUT",
-        body: { tmdbId: hit.tmdbId, rating: 5, body: null },
+    const rest = deck.filter((film) => film.tmdbId !== hit.tmdbId);
+    setDeck(rest);
+    setQuery("");
+    afterCard(previous.length, next, rest);
+    void api<Review>("/reviews", {
+      method: "PUT",
+      body: { tmdbId: hit.tmdbId, rating: 5, body: null },
+    })
+      .then((review) => {
+        if (loveAttempt.current.get(hit.tmdbId) !== attempt) return;
+        const saved = toLiked(review);
+        if (!saved) {
+          dropLove(hit.tmdbId, hit.title);
+          return;
+        }
+        setLikes((current) => current.map((film) => (film.tmdbId === saved.tmdbId ? saved : film)));
+      })
+      .catch(() => {
+        if (loveAttempt.current.get(hit.tmdbId) !== attempt) return;
+        dropLove(hit.tmdbId, hit.title);
       });
-      const liked = toLiked(review);
-      if (!liked) return;
-      const next = likes.some((film) => film.tmdbId === liked.tmdbId) ? likes : [...likes, liked];
-      setLikes(next);
-      const rest = deck.filter((film) => film.tmdbId !== hit.tmdbId);
-      setDeck(rest);
-      setQuery("");
-      afterCard(next, rest);
-    } catch (caught) {
-      setError(errorText(caught));
-    } finally {
-      setPendingId(null);
-    }
+  }
+
+  function dropLove(tmdbId: number, title: string) {
+    setLikes((current) => {
+      const next = current.filter((film) => film.tmdbId !== tmdbId);
+      likesRef.current = next;
+      return next;
+    });
+    setNotice(`Could not add ${title}.`);
   }
 
   function skipCard(hit: SearchHit) {
-    if (pendingId !== null) return;
     const nextSkipped = skipped.includes(hit.tmdbId) ? skipped : [...skipped, hit.tmdbId];
     setSkipped(nextSkipped);
     skippedRef.current = nextSkipped;
@@ -170,7 +197,7 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
     setDeck(rest);
     setShift(0);
     origin.current = null;
-    afterCard(likes, rest);
+    afterCard(likes.length, likes, rest);
   }
 
   async function remove(tmdbId: number) {
@@ -188,7 +215,6 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
   }
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (pendingId !== null) return;
     origin.current = event.clientX;
     dragX.current = 0;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -253,7 +279,7 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
                     type="button"
                     className="poster-btn"
                     onClick={() => void love(hit)}
-                    disabled={pendingId !== null || selected}
+                    disabled={selected}
                     aria-pressed={selected}
                   >
                     <div className="frame">
@@ -291,11 +317,11 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
                   <p className="caption deck-title">{front.title}</p>
                 </div>
                 <div className="deck-actions">
-                  <button type="button" className="btn ghost" disabled={pendingId !== null} onClick={() => skipCard(front)}>
+                  <button type="button" className="btn ghost" onClick={() => skipCard(front)}>
                     Skip
                   </button>
-                  <button type="button" className="btn gold" disabled={pendingId !== null} onClick={() => void love(front)}>
-                    {pendingId === front.tmdbId ? "Saving…" : "Love"}
+                  <button type="button" className="btn gold" onClick={() => love(front)}>
+                    Love
                   </button>
                 </div>
               </>
@@ -307,6 +333,11 @@ export function FirstLikesScreen({ languages, initialLikes, onDone }: Props) {
         <div className="tray-head">
           <span aria-live="polite">Your picks ({likes.length}/{goal})</span>
         </div>
+        {notice ? (
+          <p className="fine" role="status">
+            {notice}
+          </p>
+        ) : null}
         {likes.length > 0 ? (
           <div className="tray">
             {likes.map((film) => (
