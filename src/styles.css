@@ -497,6 +497,38 @@ h2 { margin: 0; font-weight: 680; }
 
 .frame.is-pending { outline: 2px solid var(--gold); outline-offset: -2px; }
 
+.deck {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-height: 280px;
+  margin-top: 12px;
+}
+
+.deck-card {
+  width: min(100%, 240px);
+  touch-action: none;
+  user-select: none;
+}
+
+.deck-title {
+  text-align: center;
+  font-size: 16px;
+}
+
+.deck-actions {
+  display: flex;
+  gap: 10px;
+  width: min(100%, 240px);
+}
+
+.deck-actions .btn { min-height: 44px; }
+
+.deck-card.loves .frame { outline: 2px solid var(--gold); outline-offset: -2px; }
+
+.deck-card.skips .frame { outline: 2px solid #8d8d93; outline-offset: -2px; }
+
 .tray { display: flex; gap: 8px; overflow-x: auto; }
 
 .tray-item { width: 64px; flex: none; }

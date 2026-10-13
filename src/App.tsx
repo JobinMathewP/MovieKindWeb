@@ -209,6 +209,7 @@ export function App() {
   } else if (route.name === "likes") {
     body = (
       <FirstLikesScreen
+        languages={route.profile.languages}
         initialLikes={route.likes}
         onDone={(likes) => setRoute({ name: "home", profile: route.profile, likes, tab: "home", guest: route.guest })}
       />
