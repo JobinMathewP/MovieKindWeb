@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { KeepSheet } from "../components/KeepSheet";
 import { Poster } from "../components/Poster";
 import { ReviewSheet } from "../components/ReviewSheet";
+import { useGuestKeep } from "../components/useGuestKeep";
 import { Stars } from "../components/Stars";
 import { api, errorText } from "../lib/api";
 import { downloadBlob, renderCardPng } from "../lib/cardImage";
@@ -10,14 +12,16 @@ import type { Film, LikedFilm, Recommendation, Review } from "../lib/types";
 
 type Props = {
   seeds: LikedFilm[];
+  guest: boolean;
   onBack: () => void;
   onReviewed: (review: Review) => void;
+  onLinkGoogle: () => Promise<void>;
 };
 
 type Phase = "wait" | "reveal" | "show";
 type Panel = "result" | "share";
 
-export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
+export function MatchScreen({ seeds, guest, onBack, onReviewed, onLinkGoogle }: Props) {
   const seedKey = seeds.map((seed) => seed.tmdbId).join(",");
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState<Phase>("wait");
@@ -30,6 +34,7 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [chosenId, setChosenId] = useState<number | null>(null);
   const [details, setDetails] = useState<Record<number, Film>>({});
+  const keep = useGuestKeep(guest, onLinkGoogle);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -152,15 +157,24 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
   function commitSeen(rating: number | null, text: string | null) {
     const filmId = current.tmdbId;
     const filmTitle = current.title;
-    setActionError("");
-    setReviewOpen(false);
-    setIndex((value) => value + 1);
-    void saveReview(filmId, rating, text)
-      .then((review) => onReviewed(review))
-      .catch((caught) => {
+    const run = async () => {
+      setActionError("");
+      setReviewOpen(false);
+      setIndex((value) => value + 1);
+      try {
+        const review = await saveReview(filmId, rating, text);
+        onReviewed(review);
+      } catch (caught) {
         const what = rating == null ? `mark ${filmTitle} as seen` : `save your review for ${filmTitle}`;
         setActionError(`Could not ${what}. ${errorText(caught)}`);
-      });
+        throw caught;
+      }
+    };
+    if (rating != null) {
+      keep.ask(run);
+      return;
+    }
+    void run();
   }
 
   return (
@@ -247,7 +261,7 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
           {chosen ? "Chosen for tonight" : "I'll watch this"}
         </button>
       </div>
-      {reviewOpen ? (
+      {reviewOpen && !keep.open ? (
         <ReviewSheet
           filmTitle={current.title}
           heading="How would you rate it?"
@@ -258,6 +272,9 @@ export function MatchScreen({ seeds, onBack, onReviewed }: Props) {
           onSkip={() => commitSeen(null, null)}
           onClose={() => setReviewOpen(false)}
         />
+      ) : null}
+      {keep.open ? (
+        <KeepSheet busy={keep.busy} error={keep.error} onGoogle={() => void keep.google()} onLater={() => void keep.later()} onClose={keep.close} />
       ) : null}
     </section>
   );

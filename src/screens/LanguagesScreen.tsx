@@ -4,11 +4,12 @@ import { languageName, PRESET_LANGUAGES } from "../lib/languages";
 import type { Profile } from "../lib/types";
 
 type Props = {
+  suggestedName?: string;
   onSaved: (profile: Profile) => void;
 };
 
-export function LanguagesScreen({ onSaved }: Props) {
-  const [name, setName] = useState("");
+export function LanguagesScreen({ suggestedName = "", onSaved }: Props) {
+  const [name, setName] = useState(suggestedName.slice(0, 80));
   const [languages, setLanguages] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");

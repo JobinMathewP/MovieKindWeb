@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { CheckMark, Poster } from "../components/Poster";
 import { Stars } from "../components/Stars";
+import { GoogleButton } from "../components/GoogleButton";
+import { api, errorText } from "../lib/api";
 import { languageName } from "../lib/languages";
 import type { LikedFilm, Profile, Review } from "../lib/types";
 import { SearchPanel } from "./SearchScreen";
@@ -11,16 +13,36 @@ type Props = {
   profile: Profile;
   likes: LikedFilm[];
   tab: HomeTab;
+  guest: boolean;
   onTab: (tab: HomeTab) => void;
   onFind: (seeds: LikedFilm[]) => void;
   onNeedFilms: () => void;
   onReviewed: (review: Review) => void;
+  onLinkGoogle: () => Promise<void>;
   onSignOut: () => void;
+  onAccountDeleted: () => void;
 };
 
-export function HomeScreen({ profile, likes, tab, onTab, onFind, onNeedFilms, onReviewed, onSignOut }: Props) {
+export function HomeScreen({
+  profile,
+  likes,
+  tab,
+  guest,
+  onTab,
+  onFind,
+  onNeedFilms,
+  onReviewed,
+  onLinkGoogle,
+  onSignOut,
+  onAccountDeleted,
+}: Props) {
   const [mood, setMood] = useState("All");
   const [picked, setPicked] = useState<number[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState("");
 
   useEffect(() => {
     if (tab === "home" && likes.length < 2) onNeedFilms();
@@ -43,7 +65,7 @@ export function HomeScreen({ profile, likes, tab, onTab, onFind, onNeedFilms, on
 
   return (
     <section className="screen">
-      {tab === "search" ? <SearchPanel onReviewed={onReviewed} /> : null}
+      {tab === "search" ? <SearchPanel guest={guest} onReviewed={onReviewed} onLinkGoogle={onLinkGoogle} /> : null}
 
       {tab === "home" && likes.length >= 2 ? (
         <>
@@ -138,9 +160,78 @@ export function HomeScreen({ profile, likes, tab, onTab, onFind, onNeedFilms, on
             </div>
           </div>
           <div className="dock">
-            <button type="button" className="btn white" onClick={onSignOut}>
-              Sign out
-            </button>
+            {confirmDelete ? (
+              <>
+                <p className="fine">
+                  Delete your account? Your name, follows, and playlists go away. Your film ratings stay, without your name.
+                </p>
+                {deleteError ? (
+                  <p className="alert" role="alert">
+                    {deleteError}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={deleting}
+                  onClick={() => {
+                    setDeleting(true);
+                    setDeleteError("");
+                    void api("/me", { method: "DELETE" })
+                      .then(() => onAccountDeleted())
+                      .catch((caught) => {
+                        setDeleteError(errorText(caught));
+                        setDeleting(false);
+                      });
+                  }}
+                >
+                  {deleting ? "Deleting account…" : "Delete account"}
+                </button>
+                <button
+                  type="button"
+                  className="btn white"
+                  disabled={deleting}
+                  onClick={() => {
+                    setConfirmDelete(false);
+                    setDeleteError("");
+                  }}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : guest ? (
+              <>
+                <p className="fine">You're exploring without an account. Continue with Google to keep your films and reviews on any device.</p>
+                {linkError ? (
+                  <p className="alert" role="alert">
+                    {linkError}
+                  </p>
+                ) : null}
+                <GoogleButton
+                  busy={linking}
+                  onClick={() => {
+                    setLinking(true);
+                    setLinkError("");
+                    void onLinkGoogle().catch((caught) => {
+                      setLinkError(errorText(caught));
+                      setLinking(false);
+                    });
+                  }}
+                />
+                <button type="button" className="btn white" onClick={onSignOut}>
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn white" onClick={onSignOut}>
+                  Sign out
+                </button>
+                <button type="button" className="btn ghost" onClick={() => setConfirmDelete(true)}>
+                  Delete account
+                </button>
+              </>
+            )}
             <p className="fine">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
           </div>
         </>

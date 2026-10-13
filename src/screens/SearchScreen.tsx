@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import { KeepSheet } from "../components/KeepSheet";
 import { Poster } from "../components/Poster";
 import { ReviewSheet } from "../components/ReviewSheet";
+import { useGuestKeep } from "../components/useGuestKeep";
 import { Stars } from "../components/Stars";
 import { api, errorText } from "../lib/api";
 import { saveReview } from "../lib/reviews";
 import type { Review, SearchHit } from "../lib/types";
 
 type Props = {
+  guest: boolean;
   onReviewed: (review: Review) => void;
+  onLinkGoogle: () => Promise<void>;
 };
 
-export function SearchPanel({ onReviewed }: Props) {
+export function SearchPanel({ guest, onReviewed, onLinkGoogle }: Props) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
@@ -22,6 +26,7 @@ export function SearchPanel({ onReviewed }: Props) {
   const [sheetError, setSheetError] = useState("");
   const searchSeq = useRef(0);
   const trimmed = query.trim();
+  const keep = useGuestKeep(guest, onLinkGoogle);
 
   useEffect(() => {
     let cancel = false;
@@ -70,18 +75,24 @@ export function SearchPanel({ onReviewed }: Props) {
 
   async function save(rating: number, body: string | null) {
     if (!draft) return;
-    setBusy(true);
-    setSheetError("");
-    try {
-      const review = await saveReview(draft.tmdbId, rating, body);
-      setMine((current) => new Map(current).set(review.tmdbId, review));
-      onReviewed(review);
-      setDraft(null);
-    } catch (caught) {
-      setSheetError(errorText(caught));
-    } finally {
-      setBusy(false);
-    }
+    const film = draft;
+    const run = async () => {
+      setBusy(true);
+      setSheetError("");
+      try {
+        const review = await saveReview(film.tmdbId, rating, body);
+        setMine((current) => new Map(current).set(review.tmdbId, review));
+        onReviewed(review);
+        setDraft(null);
+      } catch (caught) {
+        setSheetError(errorText(caught));
+        setDraft(film);
+        throw caught;
+      } finally {
+        setBusy(false);
+      }
+    };
+    keep.ask(run);
   }
 
   const existing = draft ? mine.get(draft.tmdbId) : undefined;
@@ -147,7 +158,7 @@ export function SearchPanel({ onReviewed }: Props) {
           })}
         </div>
       </div>
-      {draft ? (
+      {draft && !keep.open ? (
         <ReviewSheet
           filmTitle={draft.title}
           heading="Write a review"
@@ -162,6 +173,9 @@ export function SearchPanel({ onReviewed }: Props) {
             if (!busy) setDraft(null);
           }}
         />
+      ) : null}
+      {keep.open ? (
+        <KeepSheet busy={keep.busy} error={keep.error} onGoogle={() => void keep.google()} onLater={() => void keep.later()} onClose={keep.close} />
       ) : null}
     </>
   );
